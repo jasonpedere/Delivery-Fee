@@ -11,7 +11,7 @@
     h1{margin:0 0 8px;font-size:20px}
     p.sub{margin:0 0 18px;color:#5b6170}
 
-    .search-row{display:flex;gap:12px}
+    .search-row{display:flex;gap:12px;flex-wrap:wrap}
     .search-input{flex:1;position:relative}
     input[type="search"]{width:100%;padding:12px 14px;border-radius:8px;border:1px solid #e1e3ea;font-size:15px}
     button#searchBtn{padding:10px 16px;border-radius:8px;border:0;background:#2563eb;color:#fff;font-weight:600}
@@ -37,12 +37,16 @@
 <body>
   <div class="card">
     <h1>Delivery Fee Search</h1>
-    <p class="sub">Type store name, city/area, or barangay — suggestions appear as you type.</p>
+    <p class="sub">Search by store name and barangay. Suggestions appear as you type.</p>
 
     <div class="search-row">
       <div class="search-input">
-        <input id="q" type="search" placeholder="Search store, area/city, or barangay..." aria-label="Search" autocomplete="off">
-        <div id="suggestions" class="suggestions" hidden></div>
+        <input id="storeInput" type="search" placeholder="Search store name..." aria-label="Search store" autocomplete="off">
+        <div id="storeSuggestions" class="suggestions" hidden></div>
+      </div>
+      <div class="search-input">
+        <input id="barangayInput" type="search" placeholder="Search barangay..." aria-label="Search barangay" autocomplete="off">
+        <div id="barangaySuggestions" class="suggestions" hidden></div>
       </div>
       <button id="searchBtn">Search</button>
     </div>
@@ -76,10 +80,6 @@ function parseCSV(text){
 }
 
 let data = [];
-const suggestionsEl = document.getElementById('suggestions');
-const qEl = document.getElementById('q');
-const resultsEl = document.getElementById('results');
-const resultList = document.getElementById('resultList');
 
 async function loadData(){
   try{
@@ -102,36 +102,35 @@ async function loadData(){
 
 function normalize(s){ return (s||'').toLowerCase(); }
 
-function findMatches(q){
-  const s = normalize(q);
-  if (!s) return [];
+function findMatches(storeQ, brgyQ){
+  const sStore = normalize(storeQ);
+  const sBrgy = normalize(brgyQ);
   const matches = [];
   for (const row of data){
     const store = normalize(row['Store Name'] || row['Store'] || row['StoreName']);
-    const area = normalize(row['Area/City'] || row['Area'] || row['City']);
     const brgy = normalize(row['Brangay'] || row['Barangay'] || row['Brgy']);
+    const area = row['Area/City'] || row['Area'] || row['City'] || '';
     const fee = row['Delivery'] || row['Delivery Fee'] || row['Fee'] || '';
-    if (store.includes(s) || area.includes(s) || brgy.includes(s)){
-      matches.push({store: row['Store Name'] || row['Store'] || '', area: row['Area/City'] || row['Area'] || row['City'] || '', brgy: row['Brangay'] || row['Barangay'] || '', fee});
+    if ((sStore?store.includes(sStore):true) && (sBrgy?brgy.includes(sBrgy):true)){
+      matches.push({store: row['Store Name'] || row['Store'] || '', area, brgy: row['Brangay'] || row['Barangay'] || '', fee});
     }
   }
   return matches;
 }
 
-let activeIndex = -1;
-function renderSuggestions(list, q){
+function renderSuggestions(inputEl, suggestionsEl, list, q, type){
   suggestionsEl.innerHTML = '';
   if (!list.length){ suggestionsEl.hidden = true; return; }
   suggestionsEl.hidden = false;
-  const limit = 10;
-  list.slice(0,limit).forEach((it, idx) =>{
+  const unique = [...new Set(list.map(it => type==='store'?it.store:it.brgy))];
+  unique.slice(0,10).forEach(val =>{
     const div = document.createElement('div');
     div.className = 'suggestion';
-    div.tabIndex = 0;
-    div.dataset.index = idx;
-    div.innerHTML = `<div><strong>${highlight(it.store,q)}</strong></div>` +
-                    `<div class="meta">${escapeHtml(it.area)} &middot; ${escapeHtml(it.brgy)} <span style="float:right" class="fee">${escapeHtml(it.fee)}</span></div>`;
-    div.addEventListener('click', ()=> selectSuggestion(it));
+    div.innerHTML = highlight(val, q);
+    div.addEventListener('click', ()=>{
+      inputEl.value = val;
+      suggestionsEl.hidden = true;
+    });
     suggestionsEl.appendChild(div);
   });
 }
@@ -144,13 +143,9 @@ function highlight(text, q){
 }
 function escapeRegExp(s){ return s.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&'); }
 
-function selectSuggestion(item){
-  qEl.value = item.store;
-  suggestionsEl.hidden = true;
-  showResults([item]);
-}
-
 function showResults(list){
+  const resultList = document.getElementById('resultList');
+  const resultsEl = document.getElementById('results');
   resultList.innerHTML = '';
   if (!list || !list.length){ resultsEl.hidden = true; return; }
   resultsEl.hidden = false;
@@ -170,39 +165,32 @@ function showResults(list){
 
 function debounce(fn, wait){ let t; return (...a)=>{ clearTimeout(t); t = setTimeout(()=>fn(...a), wait); }}
 
-qEl.addEventListener('input', debounce(function(e){
-  activeIndex = -1;
+const storeInput = document.getElementById('storeInput');
+const barangayInput = document.getElementById('barangayInput');
+
+storeInput.addEventListener('input', debounce(function(e){
   const q = e.target.value.trim();
-  if (!q){ suggestionsEl.hidden = true; return; }
-  const matches = findMatches(q);
-  renderSuggestions(matches, q);
+  const matches = findMatches(q, barangayInput.value.trim());
+  renderSuggestions(storeInput, document.getElementById('storeSuggestions'), matches, q, 'store');
 },120));
 
-qEl.addEventListener('keydown', function(e){
-  const items = Array.from(suggestionsEl.children);
-  if (suggestionsEl.hidden) return;
-  if (e.key === 'ArrowDown'){
-    e.preventDefault(); activeIndex = Math.min(activeIndex+1, items.length-1); updateActive(items);
-  } else if (e.key === 'ArrowUp'){
-    e.preventDefault(); activeIndex = Math.max(activeIndex-1, 0); updateActive(items);
-  } else if (e.key === 'Enter'){
-    e.preventDefault(); if (items[activeIndex]) items[activeIndex].click(); else document.getElementById('searchBtn').click();
-  } else if (e.key === 'Escape'){
-    suggestionsEl.hidden = true;
-  }
-});
-
-function updateActive(items){ items.forEach((it,i)=> it.classList.toggle('active', i===activeIndex)); if (items[activeIndex]) items[activeIndex].scrollIntoView({block:'nearest'}); }
+barangayInput.addEventListener('input', debounce(function(e){
+  const q = e.target.value.trim();
+  const matches = findMatches(storeInput.value.trim(), q);
+  renderSuggestions(barangayInput, document.getElementById('barangaySuggestions'), matches, q, 'barangay');
+},120));
 
 document.getElementById('searchBtn').addEventListener('click', ()=>{
-  const q = qEl.value.trim();
-  if (!q){ alert('Type a search term first'); return; }
-  const matches = findMatches(q);
+  const matches = findMatches(storeInput.value.trim(), barangayInput.value.trim());
   showResults(matches);
-  suggestionsEl.hidden = true;
 });
 
-document.addEventListener('click', (e)=>{ if (!e.target.closest('.search-input')) suggestionsEl.hidden = true; });
+document.addEventListener('click', (e)=>{
+  if (!e.target.closest('.search-input')){
+    document.getElementById('storeSuggestions').hidden = true;
+    document.getElementById('barangaySuggestions').hidden = true;
+  }
+});
 
 loadData();
 </script>
