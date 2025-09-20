@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Delivery Fee Search</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;}
+    body{margin:0;background:#f6f7fb;color:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;box-sizing:border-box}
+    .card{width:100%;max-width:820px;background:#fff;border-radius:12px;box-shadow:0 6px 20px rgba(20,20,40,.08);padding:28px}
+    h1{margin:0 0 8px;font-size:20px}
+    p.sub{margin:0 0 18px;color:#5b6170}
+
+    .search-row{display:flex;gap:12px}
+    .search-input{flex:1;position:relative}
+    input[type="search"]{width:100%;padding:12px 14px;border-radius:8px;border:1px solid #e1e3ea;font-size:15px}
+    button#searchBtn{padding:10px 16px;border-radius:8px;border:0;background:#2563eb;color:#fff;font-weight:600}
+
+    .suggestions{position:absolute;left:0;right:0;top:46px;background:#fff;border:1px solid #e1e3ea;border-radius:8px;max-height:260px;overflow:auto;box-shadow:0 8px 30px rgba(20,20,40,.06);z-index:20}
+    .suggestion{padding:10px 12px;cursor:pointer;border-bottom:1px solid #f2f3f7}
+    .suggestion:last-child{border-bottom:0}
+    .suggestion:hover,.suggestion.active{background:#f3f6ff}
+    .meta{font-size:13px;color:#666;margin-top:4px}
+    .highlight{font-weight:700;background:linear-gradient(90deg,#fff9c9,#ffd);}
+
+    .results{margin-top:18px;padding:14px;border-radius:10px;background:#fbfdff;border:1px solid #eef2ff}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .col{flex:1;min-width:200px}
+    .fee{font-weight:800;font-size:18px;color:#0b8a5f}
+
+    .small{font-size:13px;color:#666}
+    .hint{margin-top:12px;font-size:13px;color:#777;word-break:break-all}
+
+    @media (max-width:520px){.search-row{flex-direction:column}.search-row button{width:100%}}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Delivery Fee Search</h1>
+    <p class="sub">Type store name, city/area, or barangay — suggestions appear as you type.</p>
+
+    <div class="search-row">
+      <div class="search-input">
+        <input id="q" type="search" placeholder="Search store, area/city, or barangay..." aria-label="Search" autocomplete="off">
+        <div id="suggestions" class="suggestions" hidden></div>
+      </div>
+      <button id="searchBtn">Search</button>
+    </div>
+
+    <div id="results" class="results" hidden>
+      <div id="resultList"></div>
+    </div>
+  </div>
+
+<script>
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR6uEc2dvXtQixLbwv5QXmSNozP5EvVETFh1TFzYHMJVnypWpafjOQj6JiVGav0b3RYs0TmUQrRkTJv/pub?gid=0&single=true&output=csv';
+
+function parseCSV(text){
+  const rows = [];
+  let cur = '';
+  let row = [];
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++){
+    const ch = text[i];
+    if (ch === '"'){
+      if (inQuotes && text[i+1] === '"') { cur += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === ',' && !inQuotes){ row.push(cur); cur = ''; }
+    else if ((ch === '\n' || ch === '\r') && !inQuotes){
+      if (cur !== '' || row.length) { row.push(cur); cur = ''; rows.push(row); row = []; }
+      if (ch === '\r' && text[i+1] === '\n') i++;
+    } else { cur += ch }
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+
+let data = [];
+const suggestionsEl = document.getElementById('suggestions');
+const qEl = document.getElementById('q');
+const resultsEl = document.getElementById('results');
+const resultList = document.getElementById('resultList');
+
+async function loadData(){
+  try{
+    const res = await fetch(CSV_URL);
+    if (!res.ok) throw new Error('Network response was not ok');
+    const text = await res.text();
+    const rows = parseCSV(text).filter(r => r.length);
+    if (!rows.length) throw new Error('No rows in CSV');
+    const header = rows[0].map(h => h.trim());
+    data = rows.slice(1).map(r => {
+      const obj = {};
+      for (let i=0;i<header.length;i++) obj[header[i]] = (r[i]||'').trim();
+      return obj;
+    }).filter(d => d[header[0]]);
+  }catch(err){
+    console.error(err);
+    alert('Could not load CSV. See console for details.');
+  }
+}
+
+function normalize(s){ return (s||'').toLowerCase(); }
+
+function findMatches(q){
+  const s = normalize(q);
+  if (!s) return [];
+  const matches = [];
+  for (const row of data){
+    const store = normalize(row['Store Name'] || row['Store'] || row['StoreName']);
+    const area = normalize(row['Area/City'] || row['Area'] || row['City']);
+    const brgy = normalize(row['Brangay'] || row['Barangay'] || row['Brgy']);
+    const fee = row['Delivery'] || row['Delivery Fee'] || row['Fee'] || '';
+    if (store.includes(s) || area.includes(s) || brgy.includes(s)){
+      matches.push({store: row['Store Name'] || row['Store'] || '', area: row['Area/City'] || row['Area'] || row['City'] || '', brgy: row['Brangay'] || row['Barangay'] || '', fee});
+    }
+  }
+  return matches;
+}
+
+let activeIndex = -1;
+function renderSuggestions(list, q){
+  suggestionsEl.innerHTML = '';
+  if (!list.length){ suggestionsEl.hidden = true; return; }
+  suggestionsEl.hidden = false;
+  const limit = 10;
+  list.slice(0,limit).forEach((it, idx) =>{
+    const div = document.createElement('div');
+    div.className = 'suggestion';
+    div.tabIndex = 0;
+    div.dataset.index = idx;
+    div.innerHTML = `<div><strong>${highlight(it.store,q)}</strong></div>` +
+                    `<div class="meta">${escapeHtml(it.area)} &middot; ${escapeHtml(it.brgy)} <span style="float:right" class="fee">${escapeHtml(it.fee)}</span></div>`;
+    div.addEventListener('click', ()=> selectSuggestion(it));
+    suggestionsEl.appendChild(div);
+  });
+}
+
+function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function highlight(text, q){
+  if (!q) return escapeHtml(text);
+  const re = new RegExp('(' + escapeRegExp(q) + ')','ig');
+  return escapeHtml(text).replace(re, '<span class="highlight">$1</span>');
+}
+function escapeRegExp(s){ return s.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&'); }
+
+function selectSuggestion(item){
+  qEl.value = item.store;
+  suggestionsEl.hidden = true;
+  showResults([item]);
+}
+
+function showResults(list){
+  resultList.innerHTML = '';
+  if (!list || !list.length){ resultsEl.hidden = true; return; }
+  resultsEl.hidden = false;
+  list.forEach(it =>{
+    const el = document.createElement('div');
+    el.className = 'row';
+    el.innerHTML = `
+      <div class="col">
+        <div style="font-weight:700">${escapeHtml(it.store)}</div>
+        <div class="small">${escapeHtml(it.area)} · ${escapeHtml(it.brgy)}</div>
+      </div>
+      <div class="fee">${escapeHtml(it.fee)}</div>
+    `;
+    resultList.appendChild(el);
+  });
+}
+
+function debounce(fn, wait){ let t; return (...a)=>{ clearTimeout(t); t = setTimeout(()=>fn(...a), wait); }}
+
+qEl.addEventListener('input', debounce(function(e){
+  activeIndex = -1;
+  const q = e.target.value.trim();
+  if (!q){ suggestionsEl.hidden = true; return; }
+  const matches = findMatches(q);
+  renderSuggestions(matches, q);
+},120));
+
+qEl.addEventListener('keydown', function(e){
+  const items = Array.from(suggestionsEl.children);
+  if (suggestionsEl.hidden) return;
+  if (e.key === 'ArrowDown'){
+    e.preventDefault(); activeIndex = Math.min(activeIndex+1, items.length-1); updateActive(items);
+  } else if (e.key === 'ArrowUp'){
+    e.preventDefault(); activeIndex = Math.max(activeIndex-1, 0); updateActive(items);
+  } else if (e.key === 'Enter'){
+    e.preventDefault(); if (items[activeIndex]) items[activeIndex].click(); else document.getElementById('searchBtn').click();
+  } else if (e.key === 'Escape'){
+    suggestionsEl.hidden = true;
+  }
+});
+
+function updateActive(items){ items.forEach((it,i)=> it.classList.toggle('active', i===activeIndex)); if (items[activeIndex]) items[activeIndex].scrollIntoView({block:'nearest'}); }
+
+document.getElementById('searchBtn').addEventListener('click', ()=>{
+  const q = qEl.value.trim();
+  if (!q){ alert('Type a search term first'); return; }
+  const matches = findMatches(q);
+  showResults(matches);
+  suggestionsEl.hidden = true;
+});
+
+document.addEventListener('click', (e)=>{ if (!e.target.closest('.search-input')) suggestionsEl.hidden = true; });
+
+loadData();
+</script>
+</body>
+</html>
