@@ -11,12 +11,12 @@
       background:#f6f7fb;
       color:#111;
       display:flex;
-      justify-content:center;   /* keep it centered horizontally */
-      padding:40px 20px;        /* top + side spacing */
+      justify-content:center;
+      padding:40px 20px;
       box-sizing:border-box;
     }
     .card{
-      margin-top:100px;         /* adjust spacing from top */
+      margin-top:100px;
       width:100%;
       max-width:820px;
       background:#fff;
@@ -29,8 +29,8 @@
 
     .search-row{display:flex;gap:12px;flex-wrap:wrap}
     .search-input{flex:1;position:relative}
-    input[type="search"]{width:100%;padding:12px 14px;border-radius:8px;border:1px solid #e1e3ea;font-size:15px}
-    button#searchBtn{padding:10px 16px;border-radius:8px;border:0;background:#2563eb;color:#fff;font-weight:600}
+    input[type="search"], input[type="text"], input[type="number"]{width:100%;padding:12px 14px;border-radius:8px;border:1px solid #e1e3ea;font-size:15px}
+    button{padding:10px 16px;border-radius:8px;border:0;background:#2563eb;color:#fff;font-weight:600;cursor:pointer}
 
     .suggestions{position:absolute;left:0;right:0;top:46px;background:#fff;border:1px solid #e1e3ea;border-radius:8px;max-height:260px;overflow:auto;box-shadow:0 8px 30px rgba(20,20,40,.06);z-index:20}
     .suggestion{padding:10px 12px;cursor:pointer;border-bottom:1px solid #f2f3f7}
@@ -47,7 +47,12 @@
     .small{font-size:13px;color:#666}
     .hint{margin-top:12px;font-size:13px;color:#777;word-break:break-all}
 
-    @media (max-width:520px){.search-row{flex-direction:column}.search-row button{width:100%}}
+    .form-section{margin-top:28px;padding:20px;border-radius:10px;background:#f9fafc;border:1px solid #e1e3ea}
+    .form-section h2{margin:0 0 12px;font-size:18px}
+    .form-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+    .form-row .form-input{flex:1}
+
+    @media (max-width:520px){.search-row{flex-direction:column}.search-row button{width:100%}.form-row{flex-direction:column}}
   </style>
 </head>
 <body>
@@ -70,10 +75,28 @@
     <div id="results" class="results" hidden>
       <div id="resultList"></div>
     </div>
+
+    <!-- New Delivery Fee Form -->
+    <div class="form-section">
+      <h2>Register New Delivery Fee</h2>
+      <div class="form-row">
+        <div class="form-input"><input id="newStore" type="text" placeholder="Store Name"></div>
+        <div class="form-input"><input id="newBarangay" type="text" placeholder="Barangay"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-input"><input id="newArea" type="text" placeholder="Area/City"></div>
+        <div class="form-input"><input id="newFee" type="number" placeholder="Delivery Fee"></div>
+      </div>
+      <button id="addBtn">Add Delivery Fee</button>
+      <p class="small">Note: This form will call a Google Apps Script Web App to save permanently.</p>
+    </div>
   </div>
 
 <script>
 const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR6uEc2dvXtQixLbwv5QXmSNozP5EvVETFh1TFzYHMJVnypWpafjOQj6JiVGav0b3RYs0TmUQrRkTJv/pub?gid=0&single=true&output=csv';
+
+// Replace with your deployed Google Apps Script Web App URL
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx6Lge0hirlVeWXWiKyKeQqCpUXZoAlEzlq2MdwsV9fvJSNMwqISRcMrdkcQ1lFMS6jxA/exec';
 
 function parseCSV(text){
   const rows = [];
@@ -205,6 +228,38 @@ document.addEventListener('click', (e)=>{
   if (!e.target.closest('.search-input')){
     document.getElementById('storeSuggestions').hidden = true;
     document.getElementById('barangaySuggestions').hidden = true;
+  }
+});
+
+// Permanent add via Google Apps Script
+async function addDeliveryToSheet(store, brgy, area, fee){
+  try{
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      mode: 'no-cors', // Apps Script usually requires no-cors
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({store, brgy, area, fee})
+    });
+    alert('Delivery fee submitted to Google Sheet! It may take a few seconds to appear.');
+  } catch (err) {
+    console.error(err);
+    alert('Error saving to Google Sheet.');
+  }
+}
+
+document.getElementById('addBtn').addEventListener('click', ()=>{
+  const store = document.getElementById('newStore').value.trim();
+  const brgy = document.getElementById('newBarangay').value.trim();
+  const area = document.getElementById('newArea').value.trim();
+  const fee = document.getElementById('newFee').value.trim();
+  if(store && brgy && area && fee){
+    addDeliveryToSheet(store, brgy, area, fee);
+    document.getElementById('newStore').value = '';
+    document.getElementById('newBarangay').value = '';
+    document.getElementById('newArea').value = '';
+    document.getElementById('newFee').value = '';
+  }else{
+    alert('Please fill out all fields.');
   }
 });
 
