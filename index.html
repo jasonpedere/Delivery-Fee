@@ -85,8 +85,11 @@
   </div>
 
 <script>
-  // ⬇️ IMPORTANT: Replace with your deployed Google Apps Script Web App URL
-  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx8AVxNpWurgtdpor0J7X-5BO7ITk-AVd9SKLNuGqRXumHNIv3nhkNfAwnnVjIW5CIEFA/exec'; 
+  // --- CONFIGURATION ---
+  // URL for submitting new data to the Google Sheet
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJl1mSJiKdIM5U4NG__GkA-Q6jLt50OySPnZH6F_ac4smHrcBp9cDU4YC9dMLsS4_jvA/exec';
+  // Public URL of the Google Sheet published as a CSV
+  const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR6uEc2dvXtQixLbwv5QXmSNozP5EvVETFh1TFzYHMJVnypWpafjOQj6JiVGav0b3RYs0TmUQrRkTJv/pub?gid=0&single=true&output=csv';
 
   // --- DOM ELEMENTS ---
   const storeInput = document.getElementById('storeInput');
@@ -105,22 +108,28 @@
   let uniqueBarangays = [];
   let activeSuggestionIndex = -1;
 
-  // --- DATA FETCHING ---
+  // --- DATA FETCHING & PARSING ---
   async function fetchDeliveryData() {
     loadingDiv.style.display = 'block';
     resultsContainer.hidden = true;
     try {
-      const response = await fetch(`${APPS_SCRIPT_URL}?action=getData`);
+      const response = await fetch(CSV_URL);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const json = await response.json();
-      deliveryData = json.data;
+      const csvText = await response.text();
+      
+      // Parse CSV data
+      const rows = csvText.trim().split('\n').slice(1); // Skip header row
+      deliveryData = rows.map(row => {
+        const [store, area, barangay, fee] = row.split(',').map(val => val.trim());
+        return { store, area, barangay, fee };
+      });
       
       // Pre-process unique values for suggestions
       const storeSet = new Set();
       const barangaySet = new Set();
       deliveryData.forEach(item => {
-        storeSet.add(item.store);
-        barangaySet.add(item.barangay);
+        if (item.store) storeSet.add(item.store);
+        if (item.barangay) barangaySet.add(item.barangay);
       });
       uniqueStores = [...storeSet].sort();
       uniqueBarangays = [...barangaySet].sort();
@@ -128,27 +137,27 @@
       console.log('Data fetched successfully:', deliveryData);
     } catch (error) {
       console.error("Failed to fetch data:", error);
-      resultsContainer.innerHTML = `<p class="text-center text-red-500 dark:text-red-400">Failed to load data. Please check the Apps Script URL and try again.</p>`;
+      resultsContainer.innerHTML = `<p class="text-center text-red-500 dark:text-red-400">Failed to load data. Please check the public CSV URL and try again.</p>`;
       resultsContainer.hidden = false;
     } finally {
       loadingDiv.style.display = 'none';
     }
   }
 
-  // --- SUGGESTIONS LOGIC ---
+  // --- SUGGESTIONS LOGIC (No changes needed) ---
   function showSuggestions(inputElement, suggestionsContainer, suggestionData) {
     const value = inputElement.value.toLowerCase();
     suggestionsContainer.innerHTML = '';
     suggestionsContainer.hidden = true;
     if (!value) return;
 
-    const filtered = suggestionData.filter(item => item.toLowerCase().includes(value)).slice(0, 10);
+    const filtered = suggestionData.filter(item => item && item.toLowerCase().includes(value)).slice(0, 10);
     if (filtered.length > 0) {
       filtered.forEach(item => {
         const div = document.createElement('div');
         div.className = 'suggestion p-2 cursor-pointer hover:bg-blue-500 hover:text-white dark:text-gray-300 dark:hover:bg-blue-600';
         div.textContent = item;
-        div.addEventListener('mousedown', () => { // mousedown to fire before blur
+        div.addEventListener('mousedown', () => {
           inputElement.value = item;
           suggestionsContainer.hidden = true;
         });
@@ -165,16 +174,12 @@
 
       if (e.key === 'ArrowDown') {
           e.preventDefault();
-          if (activeSuggestionIndex < suggestions.length - 1) {
-              activeSuggestionIndex++;
-              updateActiveSuggestion(suggestions);
-          }
+          if (activeSuggestionIndex < suggestions.length - 1) activeSuggestionIndex++;
+          updateActiveSuggestion(suggestions);
       } else if (e.key === 'ArrowUp') {
           e.preventDefault();
-          if (activeSuggestionIndex > 0) {
-              activeSuggestionIndex--;
-              updateActiveSuggestion(suggestions);
-          }
+          if (activeSuggestionIndex > 0) activeSuggestionIndex--;
+          updateActiveSuggestion(suggestions);
       } else if (e.key === 'Enter' && activeSuggestionIndex > -1) {
           e.preventDefault();
           suggestions[activeSuggestionIndex].dispatchEvent(new Event('mousedown'));
@@ -182,12 +187,10 @@
   }
   
   function updateActiveSuggestion(suggestions) {
-    suggestions.forEach((s, index) => {
-        s.classList.toggle('active', index === activeSuggestionIndex);
-    });
+    suggestions.forEach((s, index) => s.classList.toggle('active', index === activeSuggestionIndex));
   }
 
-  // --- SEARCH & RENDER ---
+  // --- SEARCH & RENDER (No changes needed) ---
   function performSearch() {
     const storeQuery = storeInput.value.trim().toLowerCase();
     const barangayQuery = barangayInput.value.trim().toLowerCase();
@@ -199,8 +202,8 @@
     }
 
     const filteredResults = deliveryData.filter(item => {
-      const storeMatch = storeQuery ? item.store.toLowerCase().includes(storeQuery) : true;
-      const barangayMatch = barangayQuery ? item.barangay.toLowerCase().includes(barangayQuery) : true;
+      const storeMatch = storeQuery ? item.store && item.store.toLowerCase().includes(storeQuery) : true;
+      const barangayMatch = barangayQuery ? item.barangay && item.barangay.toLowerCase().includes(barangayQuery) : true;
       return storeMatch && barangayMatch;
     });
 
@@ -254,22 +257,23 @@
     try {
         const response = await fetch(APPS_SCRIPT_URL, {
             method: 'POST',
-            mode: 'cors', // Required for cross-origin requests
-            headers: { 'Content-Type': 'text/plain' }, // Apps Script quirk
+            mode: 'cors',
+            headers: { 'Content-Type': 'text/plain' },
             body: JSON.stringify({ store, brgy, area, fee })
         });
         const result = await response.json();
         
         if (result.result === 'success') {
-            formMessage.textContent = '✅ Success! Data added. Refreshing local data...';
+            formMessage.textContent = '✅ Success! Data added. Refreshing local data in 5 seconds...';
             formMessage.className = 'mt-3 text-sm text-green-600 dark:text-green-400';
-            // Clear form
+            
             document.getElementById('newStore').value = '';
             document.getElementById('newBarangay').value = '';
             document.getElementById('newArea').value = '';
             document.getElementById('newFee').value = '';
-            // Refresh data
-            await fetchDeliveryData(); 
+            
+            // Wait a few seconds for the sheet to update before refetching
+            setTimeout(fetchDeliveryData, 5000); 
         } else {
             throw new Error(result.error || 'Unknown error');
         }
@@ -283,7 +287,7 @@
     }
   }
 
-  // --- EVENT LISTENERS ---
+  // --- EVENT LISTENERS (No changes needed) ---
   storeInput.addEventListener('input', () => showSuggestions(storeInput, storeSuggestions, uniqueStores));
   barangayInput.addEventListener('input', () => showSuggestions(barangayInput, barangaySuggestions, uniqueBarangays));
   
@@ -320,3 +324,4 @@
 </script>
 </body>
 </html>
+
